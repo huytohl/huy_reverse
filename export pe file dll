@@ -1,0 +1,64 @@
+#pragma comment(lib,"imagehlp")  //(API) Cơ chế chính cung cấp bởi Microsoft để đọc và chỉnh sửa các tập tin PE là imagehlp.dll
+
+#include <windows.h>
+#include <imagehlp.h>
+#include <stdio.h>
+#include <conio.h>
+
+
+char **ListDLLFunctions(char *ADllName, int *fs)
+{
+	*fs = 0;
+	DWORD *dNameRVAs(0);
+	IMAGE_EXPORT_DIRECTORY *ImageExportDirectory;
+	unsigned long cDirSize;
+	LOADED_IMAGE LoadedImage;
+	char *fname;	// function name
+	char **et = 0;	//export table
+	if (MapAndLoad(ADllName, NULL, &LoadedImage, TRUE, TRUE))	//MapAndLoad: ánh xạ image và cài đặt trước dữ liệu từ các tập tin ánh xạ ( ADLLname= address DLL name)
+	{
+		ImageExportDirectory = (IMAGE_EXPORT_DIRECTORY*)
+			ImageDirectoryEntryToData(LoadedImage.MappedAddress,	//ImageDirectoryEntryToData: SỬ dụng để có quyền truy cập vào dữ liệu Image cụ thể ( header) 
+			false, IMAGE_DIRECTORY_ENTRY_EXPORT, &cDirSize);
+		if (ImageExportDirectory != NULL)
+		{
+			dNameRVAs = (DWORD *)ImageRvaToVa(LoadedImage.FileHeader,		// ImageRvaToVa: đặt 1 RVA trong image header của 1 tập tin được ánh xạ và trả về địa chỉ ảo của các byte tương ứng trong tập tin
+				LoadedImage.MappedAddress,
+				ImageExportDirectory->AddressOfNames, NULL);
+			et = (char **)malloc(sizeof(char *)* ImageExportDirectory->NumberOfNames);	//cấp phát bộ nhớ cho ret
+			for (size_t i = 0; i < ImageExportDirectory->NumberOfNames; i++)   // điều kiện phải nhỏ hơn NumberOrFunction. đã thử <= nhưng false 
+			{
+				fname = (char *)ImageRvaToVa(LoadedImage.FileHeader,
+					LoadedImage.MappedAddress,
+					dNameRVAs[i], NULL);
+				char *p = new char[strlen(fname) + 1];		// toán tử new: cấp phát độ dài của chuỗi fname (+1) cho char *p
+				strcpy(p, fname);		//chép chuỗi
+				et[i] = p;
+			}
+			*fs = ImageExportDirectory->NumberOfNames;
+		}
+		UnMapAndLoad(&LoadedImage);		
+	}
+	return et;
+	
+}
+
+
+void main()
+{
+	printf("\t\t -------------------------- \n");
+	printf("\t\t ---\t HUYTOHL\t---\n");
+	printf("\t\t -------------------------- \n");
+
+
+	int count;
+	char **data = ListDLLFunctions("C:\\Windows\\System32\\secur32.dll", &count);
+	printf("Export table: \n\n");
+	for (int i = 0; i < count; i++)
+	{
+		printf("function %d: %s\n", i + 1, data[i]);
+	}
+	printf("\n\n...BYE BYE!!!");
+	free(data);
+	_getch();
+}
