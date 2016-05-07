@@ -1,0 +1,113 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <windows.h>
+#include <conio.h>
+
+HANDLE hFile;
+
+
+
+DWORD RvaToOffset(IMAGE_NT_HEADERS * pNtHdr, DWORD dwRVA)
+{
+	int i;
+	WORD wSections;
+	PIMAGE_SECTION_HEADER pSectionHdr;
+
+	pSectionHdr = IMAGE_FIRST_SECTION(pNtHdr);
+	wSections = pNtHdr->FileHeader.NumberOfSections;
+
+	for (i = 0; i < wSections; i++)
+	{
+		if (pSectionHdr->VirtualAddress <= dwRVA)
+		if ((pSectionHdr->VirtualAddress + pSectionHdr->Misc.VirtualSize) > dwRVA)
+		{
+			dwRVA -= pSectionHdr->VirtualAddress;
+			dwRVA += pSectionHdr->PointerToRawData;
+
+			return (dwRVA);
+		}
+
+		pSectionHdr++;
+	}
+
+	return 0;
+}
+
+int main()
+{
+	PIMAGE_DOS_HEADER pDosHeader;
+	PIMAGE_NT_HEADERS pImageHeader;
+
+	PIMAGE_DATA_DIRECTORY pDataDirectory;
+	PIMAGE_IMPORT_DESCRIPTOR pImportDescriptor;
+
+	PIMAGE_THUNK_DATA32 pFirstThunk;
+	PIMAGE_THUNK_DATA32 pOriginalFirstThunk;
+
+	PIMAGE_IMPORT_BY_NAME pNameImg;
+	PIMAGE_SECTION_HEADER pSecHeader;
+
+	char szFileName[MAX_PATH];
+	DWORD dwName, dwTest;
+
+	LPDWORD lpwdAddress;
+
+	HANDLE hMap,
+		hMapView;
+
+	BOOL bFound = FALSE;
+	void* lpMap;
+
+	printf("File: ");
+	scanf_s("%s", szFileName);
+	printf("\nImport address table: \n");
+	hFile = CreateFile(szFileName, GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	hMap = CreateFileMapping(hFile, NULL, PAGE_READONLY, 0, 0, NULL);
+	hMapView = MapViewOfFile(hMap, FILE_MAP_READ, 0, 0, 0);
+	pDosHeader = (PIMAGE_DOS_HEADER)hMapView;
+
+	pImageHeader = (PIMAGE_NT_HEADERS)((char*)pDosHeader + pDosHeader->e_lfanew);
+
+	pDataDirectory = &pImageHeader->OptionalHeader.DataDirectory[1];
+	pImportDescriptor = (PIMAGE_IMPORT_DESCRIPTOR)((char*)pDosHeader + RvaToOffset(pImageHeader, pDataDirectory->VirtualAddress));
+
+	pOriginalFirstThunk = (PIMAGE_THUNK_DATA32)((char*)pDosHeader + RvaToOffset(pImageHeader, pImportDescriptor->OriginalFirstThunk));
+
+	pSecHeader = IMAGE_FIRST_SECTION(pImageHeader);
+
+	while (pImportDescriptor->OriginalFirstThunk != 0 && !bFound)
+	{
+		
+		dwName = (DWORD)((char*)lpMap + RvaToOffset(pImageHeader, pImportDescriptor->Name));
+		pOriginalFirstThunk = (PIMAGE_THUNK_DATA32)((char*)pDosHeader + RvaToOffset(pImageHeader, pImportDescriptor->OriginalFirstThunk));
+
+		pFirstThunk = (PIMAGE_THUNK_DATA32)((char*)pDosHeader + RvaToOffset(pImageHeader, pImportDescriptor->FirstThunk));
+
+		while (pOriginalFirstThunk->u1.AddressOfData != 0 && !bFound)
+		{
+			pNameImg = (PIMAGE_IMPORT_BY_NAME)((char*)pDosHeader + RvaToOffset(pImageHeader, pOriginalFirstThunk->u1.AddressOfData));
+			dwTest = (DWORD)pOriginalFirstThunk->u1.Function & (DWORD)IMAGE_ORDINAL_FLAG32;
+
+			printf("\nAddress: 0x%x (0x%x) - Name: %s", pOriginalFirstThunk->u1.Function, pFirstThunk->u1.AddressOfData, (const char *)pNameImg->Name);
+
+			if (dwTest == 0)
+			if (strcmp("printf", (const char *)pNameImg->Name) == 0)
+			{
+				lpwdAddress = (LPDWORD)pFirstThunk->u1.Function;
+
+				bFound = TRUE;
+			}
+
+			pOriginalFirstThunk++;
+			pFirstThunk++;
+		}
+		pImportDescriptor++;
+	}
+
+	printf("\n\n...BYE BYE!!!");
+
+	CloseHandle(hFile);
+	_getch();
+	return 0;
+}
+
